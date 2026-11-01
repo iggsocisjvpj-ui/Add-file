@@ -13,7 +13,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: 8.7}
       - name: Build
-        run: ZIP=$(git log --name-only --format= --diff-filter=AM -- '*.zip' | head -n 1) && echo "Using $ZIP" && rm -rf proj && mkdir proj && unzip -q "$ZIP" -d proj && D=$(dirname $(find proj -name settings.gradle.kts | head -n 1)) && cd "$D" && gradle assembleDebug --no-daemon --stacktrace && cp $(find . -name app-debug.apk | head -n 1) "$GITHUB_WORKSPACE/app-debug.apk"
+        run: ls -la; best=""; bt=-1; for f in *.zip; do [ -e "$f" ] || continue; t=$(git log -1 --format=%ct -- "$f"); t=${t:-0}; if [ "$t" -ge "$bt" ]; then bt=$t; best="$f"; fi; done; if [ -z "$best" ]; then echo "ERROR no zip file in repo root"; exit 1; fi; echo "Using $best"; rm -rf proj; mkdir proj; unzip -q "$best" -d proj; S=$(find proj -name settings.gradle.kts | head -n 1); if [ -z "$S" ]; then echo "ERROR settings.gradle.kts not found in $best"; exit 1; fi; cd "$(dirname "$S")"; gradle assembleDebug --no-daemon --stacktrace; cp "$(find . -name app-debug.apk | head -n 1)" "$GITHUB_WORKSPACE/app-debug.apk"
       - uses: actions/upload-artifact@v4
         with: {name: app-debug, path: app-debug.apk}
       - uses: softprops/action-gh-release@v2
