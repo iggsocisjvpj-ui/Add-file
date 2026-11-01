@@ -1,31 +1,103 @@
 name: build
+
 on:
-  push:
-  workflow_dispatch:
+
+push:
+
+workflow_dispatch:
+
 permissions:
-  contents: write
+
+contents: write
+
 jobs:
-  apk:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.7
-      - run: |
-          unzip -q project.zip -d proj
-          cd proj
-          gradle assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: proj/app/build/outputs/apk/debug/app-debug.apk
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: APK ${{ github.run_number }}
-          files: proj/app/build/outputs/apk/debug/app-debug.apk
+
+apk:
+
+runs-on: ubuntu-latest
+
+steps:
+
+uses: actions/checkout@v4
+
+with:
+
+fetch-depth: 0
+
+uses: actions/setup-java@v4
+
+with:
+
+distribution: temurin
+
+java-version: 17
+
+uses: gradle/actions/setup-gradle@v4
+
+with:
+
+gradle-version: 8.7
+
+name: Find and unzip project
+
+run: |
+
+best=""; bt=-1
+
+for fin.zip; do
+
+set-e ls -la done
+
+[-e "$f"] || continue
+
+t=$(git log 1-format=%ct "$f" 2>/dev/null || echo 0)
+
+[-n "$t"] || t=0
+
+if [ "$t" ge "$bt"]; then bt=$t; best="$f"; fi
+
+if [ -z "$best" ]; then echo "ERROR: no zip file found in the repository root"; exit 1; fi
+
+echo "Using: $best"
+
+rm -rf proj && mkdir proj
+
+unzip -q "$best" -d proj
+
+s=$(find proj -name settings.gradle.kts head -n 1)
+
+if [ -z "$s"]; then echo "ERROR: settings.gradle.kts not found inside
+
+$best"; exit 1; fi
+
+echo "PROJECT_DIR=$(dirname "$s")" >> "$GITHUB_ENV"
+
+name: Build debug APK
+
+run: |
+
+cd "$PROJECT_DIR"
+
+gradle assembleDebugno-daemon-stacktrace
+
+cp "$(find -name app-debug.apk head -n 1)" "$GITHUB_WORKSPACE/app-
+
+debug.apk"
+
+uses: actions/upload-artifact@v4
+
+with:
+
+name: app-debug
+
+path: app-debug.apk
+
+uses: softprops/action-gh-release@v2
+
+with:
+
+tag_name: build-${{ github.run_number }}
+
+name: APK ${{ github.run_number }}
+
+files: app-debug.apk
