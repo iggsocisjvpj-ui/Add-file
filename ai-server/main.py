@@ -1,101 +1,153 @@
-import base64
-import binascii
+
 import os
 import time
+import base64
+import binascii
 from collections import defaultdict, deque
-from typing import Deque
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
-from openai import OpenAI
+from google import genai
+from google.genai import types
 
-app = FastAPI(title="CANDLE AI Backend", version="1.0.0")
+app = FastAPI(title="CANDLE AI Gemini Backend")
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5").strip()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-RATE_LIMIT = 8  # requests per IP per minute; basic in-memory protection
-_request_times: dict[str, Deque[float]] = defaultdict(deque)
+RATE_LIMIT = 8
+RATE_WINDOW = 60
+request_times = defaultdict(deque)
+
 
 class ChartRequest(BaseModel):
-    platform: str = Field(default="Unknown", max_length=80)
-    image_base64: str = Field(min_length=1)
+    platform: str = "Unknown"
+    image_base64: str = Field(min_length=100)
+
 
 @app.get("/")
 def root():
-    return {"service": "CANDLE AI", "status": "running", "endpoint": "/v1/chart/analyze"}
+    return {"service": "CANDLE AI", "status": "running"}
+
 
 @app.get("/health")
 def health():
-    return {"ok": True, "api_key_configured": bool(OPENAI_API_KEY)}
+    return {
+        "ok": True,
+        "api_key_configured": bool(GEMINI_API_KEY)
+    }
+
 
 @app.post("/v1/chart/analyze")
 def analyze_chart(payload: ChartRequest, request: Request):
-    now = time.time()
     ip = request.client.host if request.client else "unknown"
-    bucket = _request_times[ip]
-    while bucket and now - bucket[0] > 60:
+    now = time.time()
+    bucket = request_times[ip]
+
+    while bucket and now - bucket[0] > RATE_WINDOW:
         bucket.popleft()
+
     if len(bucket) >= RATE_LIMIT:
-        raise HTTPException(status_code=429, detail="طلبات كثيرة. انتظر دقيقة ثم حاول مجدداً.")
+        raise HTTPException(status_code=429, detail="Too many requests")
+
     bucket.append(now)
 
-    if not OPENAI_API_KEY:
-        raise HTTPException(status_code=503, detail="الخادم لم يضبط OPENAI_API_KEY بعد")
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini API key is not configured"
+        )
 
     raw = payload.image_base64.strip()
-    if raw.startswith("data:") and "," in raw:
-        raw = raw.split(",", 1)[1]
+
+    mime_type = "image/jpeg"
+
+    if raw.startswith("data:"):
+        try:
+            header, raw = raw.split(",", 1)
+            mime_type = header.split(";")[0].split(":")[1]
+        except (ValueError, IndexError):
+            raise HTTPException(status_code=400, detail="Invalid image data")
+
+    if mime_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(status_code=415, detail="Unsupported image format")
+
     try:
         image_bytes = base64.b64decode(raw, validate=True)
     except (binascii.Error, ValueError):
-        raise HTTPException(status_code=400, detail="صيغة الصورة غير صحيحة")
-    if not image_bytes:
-        raise HTTPException(status_code=400, detail="الصورة فارغة")
-    if len(image_bytes) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="حجم الصورة أكبر من 8 ميجابايت")
+        raise HTTPException(status_code=400, detail="Invalid Base64 image")
 
-    # The Android client currently sends JPEG bytes.
-    image_data_url = "data:image/jpeg;base64," + base64.b64encode(image_bytes).decode("ascii")
-    prompt = f"""حلّل صورة الرسم البياني المرفقة باللغة العربية بصفتك مساعداً تعليمياً لتحليل الشموع.
-المنصة/المصدر الذي ذكره التطبيق: {payload.platform}
+    if not image_bytes or len(image_bytes) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large or empty")
 
-قواعد صارمة:
-- اذكر أولاً ما إذا كانت الصورة واضحة وما إذا كان الإطار الزمني والزوج ظاهرين. لا تخمّن ما لا يظهر.
-- صف الاتجاه العام وبنية القمم والقيعان والشموع ومستويات الدعم/المقاومة المرئية فقط.
-- ميّز بين الملاحظة المؤكدة والاحتمال. لا تخترع قيم RSI أو EMA أو حجم تداول أو بيانات Footprint غير ظاهرة.
-- إن لم تكن الصورة كافية، فالنتيجة WAIT / انتظار، واطلب صورة أوضح.
-- أعطِ سيناريو صعود وسيناريو هبوط، وما الذي يبطل كل سيناريو إن أمكن.
-- لا تعطِ ضماناً للربح ولا تعرض نسبة نجاح متوقعة. لا تعتبر التحليل توصية مالية.
-- لا تنفذ صفقات ولا تطلب بيانات دخول أو مفاتيح المنصة.
+    prompt = f"""
+You are CANDLE AI, a careful technical chart-analysis assistant.
 
-استخدم هذا التنسيق المختصر:
-1) جودة الصورة والبيانات
-2) الاتجاه المرئي
-3) أهم المستويات والأنماط
-4) السيناريو الأقرب: صعود / هبوط / انتظار، مع السبب
-5) ما الذي يجب تأكيده قبل أي قرار يدوي
+Platform: {payload.platform}
+
+Analyze the supplied trading chart image.
+
+Identify only what is actually visible:
+- Market direction and structure.
+- Candle patterns and price action.
+- Support and resistance zones.
+- Trend strength and momentum.
+- Visible indicators and their signals.
+- Possible entry direction: BUY, SELL, or WAIT.
+
+Return your answer in clear Arabic using this structure:
+
+الاتجاه:
+إشارة التحليل: BUY / SELL / WAIT
+قوة الإشارة: ضعيفة / متوسطة / قوية
+تحليل الشموع:
+الدعم والمقاومة:
+المؤشرات الظاهرة:
+أسباب القرار:
+المخاطر:
+متى يجب الانتظار أو إلغاء الإشارة:
+
+Important rules:
+- Never invent indicator values or volume data.
+- If the chart is unclear, say so and choose WAIT.
+- Do not claim guaranteed profits or certainty.
+- This is analysis only, never execute trades.
 """
+
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY, timeout=45.0, max_retries=1)
-        response = client.responses.create(
-            model=OPENAI_MODEL,
-            instructions="أنت محلل رسوم بيانية حذر. الدقة والشفافية أهم من إعطاء إشارة. لا تدّعِ رؤية معلومات غير موجودة في الصورة.",
-            input=[{
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "image_url": image_data_url, "detail": "high"},
-                ],
-            }],
+        client = genai.Client(api_key=GEMINI_API_KEY)
+
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                types.Part.from_text(text=prompt),
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type=mime_type
+                )
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=1200
+            )
         )
-        analysis = (response.output_text or "").strip()
+
+        analysis = response.text
+
         if not analysis:
-            raise HTTPException(status_code=502, detail="لم يرجع نموذج الذكاء الاصطناعي نصاً")
+            raise HTTPException(
+                status_code=502,
+                detail="Gemini returned an empty response"
+            )
+
         return {"analysis": analysis}
+
     except HTTPException:
         raise
     except Exception as exc:
-        # Do not expose provider credentials or raw exception details to the app.
-        print(f"OpenAI request failed: {type(exc).__name__}")
-        raise HTTPException(status_code=502, detail="تعذر إكمال التحليل السحابي. تحقق من إعدادات API والرصيد ثم حاول مجدداً.")
+        print(f"Gemini request failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini analysis failed. Check server logs."
+        )
