@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Candle Assistant</string>
+    <string name="title">Candle Assistant Pro</string>
+    <string name="server_url_hint">Server URL</string>
+    <string name="symbol_hint">Symbol</string>
+    <string name="timeframe_hint">Timeframe</string>
+    <string name="pick_chart">Pick Chart</string>
+    <string name="analyze">Analyze</string>
+    <string name="status_ready">Ready for analysis</string>
+    <string name="status_running">Background analysis running…</string>
+</resources>
