@@ -22,10 +22,12 @@ import java.util.concurrent.TimeUnit
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    // Apps Script took ~285 seconds in the user's test; allow time for the
+    // response to travel back after server-side processing completes.
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(90, TimeUnit.SECONDS)
-        .readTimeout(240, TimeUnit.SECONDS)
+        .readTimeout(360, TimeUnit.SECONDS)
         .build()
     private var selectedChartUri: Uri? = null
 
@@ -66,17 +68,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         val requestUrl = when {
-            endpoint.endsWith("/exec") -> endpoint // Apps Script deployment URL
+            endpoint.endsWith("/exec") -> endpoint
             endpoint.contains("script.google.com/macros/s/") -> {
                 binding.serverInput.error = "رابط Apps Script يجب أن ينتهي بـ /exec"
                 return
             }
-            else -> "$endpoint/v1/chart/analyze" // FastAPI server base URL
+            else -> "$endpoint/v1/chart/analyze"
         }
 
         binding.analyzeButton.isEnabled = false
         binding.statusText.text = "جارٍ إرسال الصورة وتحليلها في الخلفية…"
-        binding.analysisText.text = "يرجى الانتظار حتى يكتمل تحليل Gemini."
+        binding.analysisText.text = "قد يستغرق التحليل عدة دقائق؛ اترك التطبيق مفتوحاً حتى تظهر النتيجة."
 
         lifecycleScope.launch {
             val outcome = withContext(Dispatchers.IO) {
@@ -147,11 +149,11 @@ class MainActivity : AppCompatActivity() {
                 val value = json.optString(key).trim()
                 if (value.isNotEmpty()) return value
             }
-            throw IOException("وصل رد JSON لكن لم أجد حقل التحليل. تحقق أن Apps Script يعيد {\"analysis\":\"...\"}.")
+            throw IOException("وصل رد JSON لكن لا يحتوي على حقل analysis. تحقق من استجابة Apps Script.")
         }
 
         if (text.startsWith("<!DOCTYPE", ignoreCase = true) || text.startsWith("<html", ignoreCase = true)) {
-            throw IOException("وصلت صفحة HTML بدلاً من التحليل. تحقق من صلاحيات نشر Web App ورابط /exec.")
+            throw IOException("وصلت صفحة HTML بدلاً من التحليل. تحقق من نشر Web App ورابط /exec.")
         }
         return text
     }
@@ -160,9 +162,9 @@ class MainActivity : AppCompatActivity() {
         val message = error.message.orEmpty()
         return when {
             message.contains("timeout", ignoreCase = true) ->
-                "انتهت مهلة الانتظار. جرّب صورة أصغر، وافحص Apps Script → Executions لمعرفة هل انتهى تنفيذ Gemini أم تأخر الرد.\n\n$message"
+                "انتهت مهلة الانتظار. جرّب صورة أصغر، وافحص Apps Script → Executions لمعرفة مدة التنفيذ.\n\n$message"
             message.contains("401") || message.contains("403") ->
-                "رفض Apps Script الوصول. راجع Deploy → Manage deployments واجعل Web App متاحاً للحساب المطلوب، ثم انسخ رابط /exec الصحيح.\n\n$message"
+                "رفض Apps Script الوصول. راجع إعدادات نشر Web App ورابط /exec.\n\n$message"
             message.contains("Unable to resolve host", ignoreCase = true) || message.contains("Failed to connect", ignoreCase = true) ->
                 "تعذر الاتصال. تحقق من الإنترنت والرابط المنشور.\n\n$message"
             else -> message.ifBlank { "حدث خطأ غير معروف أثناء التحليل." }
