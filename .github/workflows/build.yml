@@ -13,6 +13,7 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,7 +36,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Select and build Android project archive
+      - name: Select and build Android project
         shell: bash
         run: |
           set -euo pipefail
@@ -44,21 +45,24 @@ jobs:
           preferred="CANDLE_QUANT_BUILD90_UPDATED.zip"
           selected=""
 
-          is_android_project_zip() {
+          is_android_zip() {
             local archive="$1"
             unzip -Z1 "$archive" | grep -Eq '(^|/)settings\.gradle\.kts$' || return 1
             unzip -Z1 "$archive" | grep -Eq '(^|/)app/build\.gradle\.kts$' || return 1
           }
 
-          if [[ -f "$preferred" ]] && is_android_project_zip "$preferred"; then
+          if [[ -f "$preferred" ]] && is_android_zip "$preferred"; then
             selected="$preferred"
           else
             best_time=-1
+
             for archive in *.zip; do
               [[ -f "$archive" ]] || continue
-              if is_android_project_zip "$archive"; then
+
+              if is_android_zip "$archive"; then
                 commit_time="$(git log -1 --format=%ct -- "$archive" 2>/dev/null || echo 0)"
                 commit_time="${commit_time:-0}"
+
                 if (( commit_time >= best_time )); then
                   best_time="$commit_time"
                   selected="$archive"
@@ -68,54 +72,57 @@ jobs:
           fi
 
           if [[ -z "$selected" ]]; then
-            echo "ERROR: No Android project ZIP found."
-            echo "Expected: CANDLE_QUANT_BUILD90_UPDATED.zip"
-            echo "The ZIP must contain settings.gradle.kts and app/build.gradle.kts."
+            echo "ERROR: Android project ZIP not found."
             exit 1
           fi
 
-          echo "Selected Android project: $selected"
+          echo "Selected archive: $selected"
+
           rm -rf project
           mkdir -p project
           unzip -q "$selected" -d project
 
           settings_file="$(find project -type f -name settings.gradle.kts -print -quit)"
+
           if [[ -z "$settings_file" ]]; then
-            echo "ERROR: settings.gradle.kts was not found after extraction."
+            echo "ERROR: settings.gradle.kts not found."
             exit 1
           fi
 
           project_dir="$(dirname "$settings_file")"
+
           if [[ ! -f "$project_dir/app/build.gradle.kts" ]]; then
-            echo "ERROR: app/build.gradle.kts is missing beside settings.gradle.kts."
+            echo "ERROR: app/build.gradle.kts not found."
             exit 1
           fi
 
-          echo "Building from: $project_dir"
           cd "$project_dir"
+
           gradle assembleDebug --no-daemon --stacktrace
 
           apk_path="$(find app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+
           if [[ -z "$apk_path" ]]; then
-            echo "ERROR: APK output was not created."
+            echo "ERROR: APK was not generated."
             exit 1
           fi
 
- CP. CP. "$GITHUB_WORKSPACE/app-debug.apk" "$apk_path" "$GITHUB_WORKSPACE/app-debug.apk" 
- صدى. "تم الانتهاء من بناء APK بنجاح"..
+          cp "$apk_path" "$GITHUB_WORKSPACE/app-debug.apk"
 
- - الاسم.: ت.حميل APK القطعة الأثرية الاستخدامات.  
- الاستخدامات. : ا...لإجراءات/الحمولة-القطعة الأثرية@v4 مع...  
- مع... :
-  الاسم. : شمعة-كمية-بناء 90-APK.
-  المسار. : التطبيق-debug.apk
-  إذا لم يتم العثور على ملفات. : خطأ.
-  أيام الاحتفاظ. : 14
+          echo "APK BUILD SUCCESSFUL"
 
- -                                الاسم. name                              : P.الاستخدامات.  الاستخدامات.  نشر إصدار GitHub
-  الاستخدامات.  : s...oftprops/action-gh-release@v2 مع... 
- مع...  :
- tag_اسم.  : "بناء-${{ github.run_number}"   (باللغة الإنجليزية) .  (باللغة الإنجليزية) . 
-  الاسم.  : "كاندل كوانت APK ${{ github.run_number }}"
-  الملفات.  : التطبيق-debug.apk
- فشل_on_unmatched_files. : صحيح؟
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CANDLE-QUANT-BUILD90-APK
+          path: app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "build-${{ github.run_number }}"
+          name: "CANDLE QUANT APK ${{ github.run_number }}"
+          files: app-debug.apk
+          fail_on_unmatched_files: true
