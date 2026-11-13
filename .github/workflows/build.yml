@@ -1,99 +1,121 @@
 
 name: Build Android APK
 
-على.:
- دفع. :
- الفروع. :
- - الرئيسية.
- سير العمل_إرسال :
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
-الأذونات.:
- المحتويات. : اكتب.
+permissions:
+  contents: write
 
-وظائف.:
- APK. :
- يعمل على. : أوبونتو-الأحدث.
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
- خطوات :
- - الاسم.: مستودع الخروج.
-  الاستخدامات. : الإجراءات/الخروج @v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Select and build Android project archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          preferred="CANDLE_QUANT_BUILD90_UPDATED.zip"
+          selected=""
+
+          is_android_project_zip() {
+            local archive="$1"
+            unzip -Z1 "$archive" | grep -Eq '(^|/)settings\.gradle\.kts$' || return 1
+            unzip -Z1 "$archive" | grep -Eq '(^|/)app/build\.gradle\.kts$' || return 1
+          }
+
+          if [[ -f "$preferred" ]] && is_android_project_zip "$preferred"; then
+            selected="$preferred"
+          else
+            best_time=-1
+            for archive in *.zip; do
+              [[ -f "$archive" ]] || continue
+              if is_android_project_zip "$archive"; then
+                commit_time="$(git log -1 --format=%ct -- "$archive" 2>/dev/null || echo 0)"
+                commit_time="${commit_time:-0}"
+                if (( commit_time >= best_time )); then
+                  best_time="$commit_time"
+                  selected="$archive"
+                fi
+              fi
+            done
+          fi
+
+          if [[ -z "$selected" ]]; then
+            echo "ERROR: No Android project ZIP found."
+            echo "Expected: CANDLE_QUANT_BUILD90_UPDATED.zip"
+            echo "The ZIP must contain settings.gradle.kts and app/build.gradle.kts."
+            exit 1
+          fi
+
+          echo "Selected Android project: $selected"
+          rm -rf project
+          mkdir -p project
+          unzip -q "$selected" -d project
+
+          settings_file="$(find project -type f -name settings.gradle.kts -print -quit)"
+          if [[ -z "$settings_file" ]]; then
+            echo "ERROR: settings.gradle.kts was not found after extraction."
+            exit 1
+          fi
+
+          project_dir="$(dirname "$settings_file")"
+          if [[ ! -f "$project_dir/app/build.gradle.kts" ]]; then
+            echo "ERROR: app/build.gradle.kts is missing beside settings.gradle.kts."
+            exit 1
+          fi
+
+          echo "Building from: $project_dir"
+          cd "$project_dir"
+          gradle assembleDebug --no-daemon --stacktrace
+
+          apk_path="$(find app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+          if [[ -z "$apk_path" ]]; then
+            echo "ERROR: APK output was not created."
+            exit 1
+          fi
+
+ CP. CP. "$GITHUB_WORKSPACE/app-debug.apk" "$apk_path" "$GITHUB_WORKSPACE/app-debug.apk" 
+ صدى. "تم الانتهاء من بناء APK بنجاح"..
+
+ - الاسم.: ت.حميل APK القطعة الأثرية الاستخدامات.  
+ الاستخدامات. : ا...لإجراءات/الحمولة-القطعة الأثرية@v4 مع...  
  مع... :
-  جلب العمق. : 0
-
-   الاسم. الاسم.إعداد جافا 17الإجراءات/الإعداد-java@v4 
-   الاستخدامات.F.العثور على وبناء مشروع الروبوت  : الإجراءات/الإعداد-java@v4
- مع... :
-  التوزيع. : تيمورين.
-  جافا-الإصدار. : '17'
-
- - الاسم.: إعداد الروبوت SDK
-  الاستخدامات. : Android-actions/setup-android@v4
- مع... :
- حزم. : أدوات المنصة.
-
- - الاسم.: إعداد Gradle
-  الاستخدامات. : gradle/actions/setup-gradle@v4
- مع... :
-  نسخة الدرج. : '8.7'
-
- -  صدى "خطأ.  ؛ ثمF.العثور على وبناء مشروع الروبوت
-  شل. : ب.الرماد.
- تشغيل. : |
- مجموعة -UO PipeFaiL. 
-
- أرشيف ="CANDLE_QUANT_BUILD90_UPDATED.zip" "CANDLE_QUANT_BUILD90_UPDATED.zip" 
-
-   إذا   [! -f  "$ أرشيف"]؛ ثم  [! -f  "$ أرشيف"]؛ ثم  
- صدى "خطأ.: لم يتم العثور على Android ZIP": لم يتم العثور على Android ZIP"
-  الخروج 1  
-  في.  
-
-  مشروع RM -RF.  
- مشروع Mkdir -P. 
-
- يونزيب -Q. "$ أرشيف"  -d المشروع  "الأرشيف $" مشروع د.
-
-   SETTINGS = $ (العثور على مشروع -type f -name   "settings.gradle.kts" -طباعة -الاستقالة) . "settings.gradle.kts" -طباعة -الاستقالة) .
-
-   إذا   [-z. "الإعدادات $"]؛ ثم  [ -z. "الإعدادات $" ]ثم.
- صدى "خطأ.: settings.gradle.kts لم يتم العثور عليها" : settings.gradle.kts not found"
-  الخروج 1  
-  في.  
-
- PROJECT_DIR =$ (اللسم) . "الإعدادات $") "الإعدادات $")
-
-   إذا   [! -f  "$PROJECT_DIR/app/build.gradle.kts"]؛ ثم  [! -f  "$PROJECT_DIR/app/build.gradle.kts"]؛ ثم  
- صدى "خطأ.: لم يتم العثور على التطبيق / build.gradle.kts" : app/build.gradle.kts not found"
-  الخروج 1  
-  في.  
-
- CD. "$PROJECT_DIR" "$PROJECT_DIR" 
-
-      التجميع التدريجيمجرد - لا شيطان --مهاجم      
-
-      APK = $ (العثور على التطبيق / البناء / المخرجات /apk / debug -type f -name      "*.apk" -طباعة -الاستقالة) . "*.apk" -طباعة -الاستقالة) . 
-
-      إذا      [-z. "$APK"]   ؛ ثم     [-z. "$APK"]   ؛ ثم    
- صدى "خطأ.: APK لم يتم إنشاؤها": APK لم يتم إنشاؤها"
-  الخروج 1  
-  في.  
-
- CP. "$APK" "$GITHUB_WORKSPACE/app-debug.apk" 
-
-    صدى.    "بناء APK ناجح"
-
- - الاسم.: U .حميل APK الاستخدامات.    
-  .حميل APK الاستخدامات.        : ا...
- مع...   :
   الاسم. : شمعة-كمية-بناء 90-APK.
   المسار. : التطبيق-debug.apk
   إذا لم يتم العثور على ملفات. : خطأ.
   أيام الاحتفاظ. : 14
 
- - :
--: s.......oftprops/action-gh-release@v2 مع... s....oftprops/action-gh-release@v2 مع... s....oftprops/action-gh-release@v2... s.......oftprops/action-gh-release مع... s......oftprops/action-gh-release......oftprops/action-gh-release @v2 مع... s.........oftprops/gh-release @v2 مع...  مع...
+ -                                الاسم. name                              : P.الاستخدامات.  الاستخدامات.  نشر إصدار GitHub
+  الاستخدامات.  : s...oftprops/action-gh-release@v2 مع... 
  مع...  :
- tag_اسم.  : ب ناء-$                                                  الاسم.   {معة كمية APK $.}}
-                                                 الاسم.                                                : ش..معة كمية APK $.                                                 الملفات.  {{ Github.run_رقم }}
-                                                 الملفات.                                                : التطبيق-debug.apk
+ tag_اسم.  : "بناء-${{ github.run_number}"   (باللغة الإنجليزية) .  (باللغة الإنجليزية) . 
+  الاسم.  : "كاندل كوانت APK ${{ github.run_number }}"
+  الملفات.  : التطبيق-debug.apk
  فشل_on_unmatched_files. : صحيح؟
