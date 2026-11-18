@@ -3,6 +3,17 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// توقيع ثابت من متغيرات البيئة في GitHub Actions، حتى يتحدّث التطبيق فوق النسخة القديمة دون حذف البيانات.
+// إذا غابت المتغيرات يُستخدم مفتاح التصحيح العادي.
+def ksPath = System.getenv('KEYSTORE_PATH')
+def ksPass = System.getenv('KEYSTORE_PASSWORD')
+def sAlias = System.getenv('KEY_ALIAS')
+def sKeyPass = System.getenv('KEY_PASSWORD')
+def hasStableKey = [ksPath, ksPass, sAlias, sKeyPass].every { it }
+
+// رقم البناء يزيد مع كل تشغيل، وإلا يرفض أندرويد التحديث
+def buildNum = (System.getenv('BUILD_NUMBER') ?: '0').toInteger() + 1000
+
 android {
     namespace 'com.candleassistant.app'
     compileSdk 34
@@ -11,16 +22,35 @@ android {
         applicationId 'com.candleassistant.app'
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode buildNum
+        versionName "3.${buildNum}"
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
+    signingConfigs {
+        if (hasStableKey) {
+            stable {
+                storeFile file(ksPath)
+                storePassword ksPass
+                keyAlias sAlias
+                keyPassword sKeyPass
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (hasStableKey) {
+                signingConfig signingConfigs.stable
+            }
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasStableKey) {
+                signingConfig signingConfigs.stable
+            }
         }
     }
 
