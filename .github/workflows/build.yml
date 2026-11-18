@@ -1,4 +1,3 @@
-
 name: Build Android APK
 
 on:
@@ -36,40 +35,50 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Restore signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${KEYSTORE_BASE64:-}" ]]; then
+            echo "WARNING: KEYSTORE_BASE64 is missing; the APK will not have the stable signature."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/candle.jks"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/candle.jks" >> "$GITHUB_ENV"
+
       - name: Select and build Android project
         shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
           shopt -s nullglob
 
-          preferred="CANDLE_QUANT_BUILD90_UPDATED.zip"
-          selected=""
-
           is_android_zip() {
-            local archive="$1"
-            unzip -Z1 "$archive" | grep -Eq '(^|/)settings\.gradle\.kts$' || return 1
-            unzip -Z1 "$archive" | grep -Eq '(^|/)app/build\.gradle\.kts$' || return 1
+            local names
+            names="$(unzip -Z1 "$1")"
+            grep -Eq '(^|/)settings\.gradle\.kts$' <<< "$names" || return 1
+            grep -Eq '(^|/)app/build\.gradle\.kts$' <<< "$names" || return 1
           }
 
-          if [[ -f "$preferred" ]] && is_android_zip "$preferred"; then
-            selected="$preferred"
-          else
-            best_time=-1
-
-            for archive in *.zip; do
-              [[ -f "$archive" ]] || continue
-
-              if is_android_zip "$archive"; then
-                commit_time="$(git log -1 --format=%ct -- "$archive" 2>/dev/null || echo 0)"
-                commit_time="${commit_time:-0}"
-
-                if (( commit_time >= best_time )); then
-                  best_time="$commit_time"
-                  selected="$archive"
-                fi
+          selected=""
+          best_time=-1
+          for archive in *.zip; do
+            [[ -f "$archive" ]] || continue
+            if is_android_zip "$archive"; then
+              commit_time="$(git log -1 --format=%ct -- "$archive" 2>/dev/null || echo 0)"
+              commit_time="${commit_time:-0}"
+              if (( commit_time >= best_time )); then
+                best_time="$commit_time"
+                selected="$archive"
               fi
-            done
-          fi
+            fi
+          done
 
           if [[ -z "$selected" ]]; then
             echo "ERROR: Android project ZIP not found."
@@ -83,38 +92,33 @@ jobs:
           unzip -q "$selected" -d project
 
           settings_file="$(find project -type f -name settings.gradle.kts -print -quit)"
-
           if [[ -z "$settings_file" ]]; then
             echo "ERROR: settings.gradle.kts not found."
             exit 1
           fi
 
           project_dir="$(dirname "$settings_file")"
-
           if [[ ! -f "$project_dir/app/build.gradle.kts" ]]; then
             echo "ERROR: app/build.gradle.kts not found."
             exit 1
           fi
 
           cd "$project_dir"
-
           gradle assembleDebug --no-daemon --stacktrace
 
           apk_path="$(find app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
-
           if [[ -z "$apk_path" ]]; then
             echo "ERROR: APK was not generated."
             exit 1
           fi
 
           cp "$apk_path" "$GITHUB_WORKSPACE/app-debug.apk"
-
           echo "APK BUILD SUCCESSFUL"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CANDLE-QUANT-BUILD90-APK
+          name: CANDLE-QUANT-APK-${{ github.run_number }}
           path: app-debug.apk
           if-no-files-found: error
           retention-days: 14
